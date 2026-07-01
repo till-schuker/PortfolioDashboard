@@ -1,93 +1,104 @@
-"""
-Portfolio Dashboard (robust production version)
-"""
-
 import pandas as pd
 import streamlit as st
 
-# Plotly optional (verhindert Cloud-Crashes)
+# Optional: Plotly (safe import)
 try:
     import plotly.express as px
-    PLOTLY_AVAILABLE = True
+    PLOTLY = True
 except Exception:
-    PLOTLY_AVAILABLE = False
+    PLOTLY = False
 
 
 # -----------------------------
-# Config
+# CONFIG
 # -----------------------------
 st.set_page_config(
     page_title="Portfolio Dashboard",
     page_icon="📊",
-    layout="wide",
+    layout="wide"
 )
 
 CSV_PATH = "positions.csv"
 
-REQUIRED_COLUMNS = ["name", "quantity", "price", "asset_type"]
+REQUIRED = ["name", "quantity", "price", "asset_type"]
 
 
 # -----------------------------
-# Robust CSV loader
+# ULTRA ROBUST CSV LOADER
 # -----------------------------
 def read_csv_robust(file, path):
-    encodings = ["utf-8", "utf-8-sig", "utf-16", "latin1"]
+    encodings = ["utf-8", "utf-8-sig", "utf-16", "utf-16-le", "latin1"]
+    separators = [",", ";", "\t"]
 
     for enc in encodings:
-        try:
-            if file is not None:
-                return pd.read_csv(file, encoding=enc)
-            else:
-                return pd.read_csv(path, encoding=enc)
-        except Exception:
-            continue
+        for sep in separators:
+            try:
+                if file is not None:
+                    file.seek(0)
+                    df = pd.read_csv(file, encoding=enc, sep=sep)
+                else:
+                    df = pd.read_csv(path, encoding=enc, sep=sep)
 
-    raise ValueError("CSV konnte mit keinem Encoding gelesen werden.")
+                # Heuristik: sinnvolle Datei erkannt?
+                if df.shape[1] >= 3:
+                    return df
 
+            except Exception:
+                continue
 
-@st.cache_data(show_spinner=False)
-def load_data(file, path):
-    warnings = []
-
+    # letzter Versuch (Excel / weird files)
     try:
-        df = read_csv_robust(file, path)
+        if file is not None:
+            file.seek(0)
+            return pd.read_csv(file, engine="python")
+        else:
+            return pd.read_csv(path, engine="python")
     except Exception as e:
-        st.error(f"CSV konnte nicht geladen werden: {e}")
-        return pd.DataFrame(), [str(e)]
+        raise ValueError(f"CSV konnte nicht gelesen werden: {e}")
 
-    if df.empty:
-        return pd.DataFrame(), ["CSV ist leer"]
+
+# -----------------------------
+# LOAD + CLEAN
+# -----------------------------
+@st.cache_data(show_spinner=False)
+def load_data(uploaded_file, path):
+    df = read_csv_robust(uploaded_file, path)
+
+    warnings = []
 
     # normalize columns
     df.columns = [c.strip().lower() for c in df.columns]
 
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    missing = [c for c in REQUIRED if c not in df.columns]
     if missing:
         return pd.DataFrame(), [f"Fehlende Spalten: {missing}"]
 
-    # clean text fields
-    df["name"] = df["name"].fillna("Unknown")
-    df["asset_type"] = df["asset_type"].fillna("Other")
+    # clean text
+    df["name"] = df["name"].fillna("unknown")
+    df["asset_type"] = df["asset_type"].fillna("other")
 
-    # numeric conversion
+    # numeric
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
+    before = len(df)
     df = df.dropna(subset=["quantity", "price"])
-
-    # remove negative nonsense
     df = df[(df["quantity"] >= 0) & (df["price"] >= 0)]
 
-    # compute value
     df["value"] = df["quantity"] * df["price"]
+
+    after = len(df)
+
+    if before != after:
+        warnings.append(f"{before - after} ungültige Zeilen entfernt")
 
     return df, warnings
 
 
 # -----------------------------
-# Sidebar
+# SIDEBAR
 # -----------------------------
-st.sidebar.title("📂 Daten")
+st.sidebar.title("Datenquelle")
 
 uploaded = st.sidebar.file_uploader("CSV hochladen", type=["csv"])
 
@@ -97,40 +108,39 @@ for w in warnings:
     st.warning(w)
 
 if df.empty:
-    st.info("Keine gültigen Daten vorhanden.")
+    st.info("Keine gültigen Daten.")
     st.stop()
 
 
 # -----------------------------
 # KPIs
 # -----------------------------
-total_value = df["value"].sum()
+total = df["value"].sum()
 
 col1, col2, col3 = st.columns(3)
-col1.metric("Portfolio Wert", f"{total_value:,.2f} €")
+col1.metric("Portfolio Wert", f"{total:,.2f} €")
 col2.metric("Positionen", len(df))
-col3.metric("Ø Position", f"{total_value/len(df):,.2f} €")
+col3.metric("Ø Position", f"{total/len(df):,.2f} €")
 
 st.divider()
 
 
 # -----------------------------
-# Allocation
+# ALLOCATION
 # -----------------------------
 st.subheader("Asset Allocation")
 
 alloc = df.groupby("asset_type")["value"].sum().reset_index()
 
-if PLOTLY_AVAILABLE:
+if PLOTLY:
     fig = px.pie(alloc, names="asset_type", values="value", hole=0.4)
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.warning("Plotly nicht verfügbar → Tabelle")
     st.dataframe(alloc)
 
 
 # -----------------------------
-# Top holdings
+# TOP POSITIONS
 # -----------------------------
 st.subheader("Top Positionen")
 
@@ -140,7 +150,7 @@ st.dataframe(top, use_container_width=True)
 
 
 # -----------------------------
-# Concentration risk
+# CONCENTRATION
 # -----------------------------
 st.subheader("Konzentration")
 
@@ -149,16 +159,15 @@ sorted_vals = df.sort_values("value", ascending=False)["value"]
 top3 = sorted_vals.head(3).sum()
 top5 = sorted_vals.head(5).sum()
 
-top3_share = top3 / total_value * 100 if total_value else 0
-top5_share = top5 / total_value * 100 if total_value else 0
+top3_share = top3 / total * 100 if total else 0
+top5_share = top5 / total * 100 if total else 0
 
 c1, c2 = st.columns(2)
 c1.metric("Top 3 Anteil", f"{top3_share:.1f}%")
 c2.metric("Top 5 Anteil", f"{top5_share:.1f}%")
 
-
 if top3_share > 50:
-    st.warning("Hohe Konzentration im Portfolio")
+    st.warning("Starke Konzentration im Portfolio")
 elif top3_share > 30:
     st.info("Moderate Konzentration")
 else:
@@ -166,7 +175,7 @@ else:
 
 
 # -----------------------------
-# Raw data
+# RAW DATA
 # -----------------------------
 with st.expander("Rohdaten"):
     st.dataframe(df, use_container_width=True)
