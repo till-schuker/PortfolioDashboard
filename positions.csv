@@ -1,0 +1,12 @@
+Name;ISIN;Quantity;Price;Asset_type
+Core MSCI World;IE000BI8OT95;196,159397; 136,02 ? ;ETF
+ S&P 500;IE000XZSV718;326; 13,17ÿ? ;ETF
+Core MSCI Emerging Marketsÿ;LU1437017350;47,776437; 90,65 ? ;ETF
+Berkshire Hathaway (B);US0846707026;3,407248; 469,59 ? ;Stock
+Netflix;US64110L1061;13; 80,08 ? ;Stock
+Meta;US30303M1027;1; 538,70 ? ;Stock
+Spotify;LU1778762911;2; 457,00 ? ;Stock
+Ethereum;-;0,037581; - ;Krypto
+Bitcoin;-;0,00560329;-;Krypto
+Cash;-;1; 2.600,00 ? ;Cash
+Festgeld;-;1; 10.250,00 ? ;Festgeld
